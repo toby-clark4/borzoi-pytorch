@@ -79,7 +79,7 @@ class Gene:
         exon_starts = [exon.begin for exon in self.exons]
         exon_ends = [exon.end for exon in self.exons]
         return min(exon_starts), max(exon_ends)
-    
+
     def output_slice_old(self, seq_start, seq_len, model_stride, span=False):
         gene_slice = []
 
@@ -95,7 +95,7 @@ class Gene:
             slice_end = int(np.round(gene_seq_end / model_stride))
 
             # clip right boundaries
-            slice_max = int(seq_len/model_stride)
+            slice_max = int(seq_len / model_stride)
             slice_start = min(slice_start, slice_max)
             slice_end = min(slice_end, slice_max)
 
@@ -112,7 +112,7 @@ class Gene:
                 slice_end = int(np.round(exon_seq_end / model_stride))
 
                 # clip right boundaries
-                slice_max = int(seq_len/model_stride)
+                slice_max = int(seq_len / model_stride)
                 slice_start = min(slice_start, slice_max)
                 slice_end = min(slice_end, slice_max)
 
@@ -121,11 +121,17 @@ class Gene:
         return np.array(gene_slice)
 
     def output_slice(
-        self, seq_start, seq_len, model_stride, span=False, majority_overlap=False, old_version=False
+        self,
+        seq_start,
+        seq_len,
+        model_stride,
+        span=False,
+        majority_overlap=False,
+        old_version=False,
     ):
-        if old_version :
+        if old_version:
             return self.output_slice_old(seq_start, seq_len, model_stride, span=span)
-        
+
         gene_slice = []
 
         def clip_boundaries(slice_start, slice_end):
