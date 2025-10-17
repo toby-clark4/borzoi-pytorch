@@ -16,7 +16,7 @@
 
 from borzoi_pytorch.config_borzoi import BorzoiConfig
 from transformers import PreTrainedModel
-from transformers.modeling_outputs import SequenceClassifierOutput
+from transformers.modeling_outputs import SequenceClassifierOutput, ModelOutput
 import torch.nn as nn
 import torch
 import numpy as np
@@ -24,7 +24,7 @@ import math
 import copy
 from pathlib import Path
 
-from .pytorch_borzoi_utils import Residual, TargetLengthCrop, undo_squashed_scale
+from .pytorch_borzoi_utils import Residual, TargetLengthCrop, undo_squashed_scale, SparseMSELoss
 from .pytorch_borzoi_transformer import Attention, FlashAttention
 
 import pandas as pd
@@ -203,12 +203,16 @@ class Borzoi(PreTrainedModel):
 
         # Add a simple methylation head
         self.enable_methylation_head = getattr(config, "enable_methylation_head", False)
+        self.single_target = getattr(config, "single_target", True)
         if self.enable_methylation_head:
-            self.methylation_head = nn.Sequential(
-                nn.Linear(1920, 256),  # Conv output has shape (batch, 1920, n_bins)
-                nn.GELU(),
-                nn.Linear(256, 1),
-            )
+            if self.single_target:
+                self.methylation_head = nn.Sequential(
+                    nn.Linear(1920, 256),  # Conv output has shape (batch, 1920, n_bins)
+                    nn.GELU(),
+                    nn.Linear(256, 1),
+                )
+            else:
+                self.methylation_head = nn.Conv1d(in_channels=1920, out_channels=1, kernel_size=1)
 
         self.final_softplus = nn.Softplus()
 
@@ -345,22 +349,37 @@ class Borzoi(PreTrainedModel):
         # disable autocast for more precision in final layer
         with torch.amp.autocast("cuda", enabled=False):
             if self.enable_methylation_head:
-                centre_feat = x[:, :, self.centre_idx]  # (batch, 1920)
-                out = self.methylation_head(
-                    centre_feat
-                )  # Can adjust with window around centre here.
-                loss_fct = nn.MSELoss()
-                if labels is not None:
-                    loss = loss_fct(out.squeeze(), labels.squeeze())
-                else:
-                    loss = None
+                if self.single_target:
+                    centre_feat = x[:, :, self.centre_idx]  # (batch, 1920)
+                    out = self.methylation_head(
+                        centre_feat.float()
+                    )  # Can adjust with window around centre here.
+                    loss_fct = nn.MSELoss()
+                    if labels is not None:
+                        loss = loss_fct(out.squeeze(), labels.squeeze())
+                    else:
+                        loss = None
 
-                return SequenceClassifierOutput(
-                    loss=loss,
-                    logits=out,
-                    hidden_states=None,
-                    attentions=None,
-                )
+                    return SequenceClassifierOutput(
+                        loss=loss,
+                        logits=out,
+                        hidden_states=None,
+                        attentions=None,
+                    )
+                else:
+                    out = self.final_softplus(self.methylation_head(x.float()))
+
+                    loss_fct = SparseMSELoss()
+                    if labels is not None:
+                        loss = loss_fct(out, labels)
+                    else:
+                        loss = None
+                    
+                    return ModelOutput(
+                        loss=loss,
+                        logits=out,
+                    )
+
 
             if data_parallel_training:
                 # we need this to get gradients for both heads if doing DDP training

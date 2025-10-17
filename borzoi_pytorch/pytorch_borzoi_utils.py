@@ -89,78 +89,85 @@ def undo_squashed_scale(
     return x
 
 
-def poisson_multinomial_torch(
-    y_pred,
-    y_true,
-    total_weight: float = 0.2,
-    epsilon: float = 1e-6,
-    rescale: bool = False,
-):
-    """Possion decomposition with multinomial specificity term.
-
-    Args:
-      total_weight (float): Weight of the Poisson total term.
-      epsilon (float): Added small value to avoid log(0).
+class PoissonMultinomial(nn.Module):
     """
-    seq_len = y_true.shape[1]
+    Poisson loss decomposition with a multinomial term
+    Adapted from https://github.com/johahi/training-borzoi
+    """
 
-    # add epsilon to protect against tiny values
-    y_true += epsilon
-    y_pred += epsilon
+    def __init__(
+        self,
+        total_weight: float = 0.2,
+        epsilon: float = 1e-6,
+        rescale: bool = False
+    ):
+        super().__init__()
+        self.total_weight = total_weight
+        self.epsilon = epsilon
+        self.rescale = rescale
 
-    # sum across lengths
-    s_true = y_true.sum(dim=1, keepdim=True)
-    s_pred = y_pred.sum(dim=1, keepdim=True)
+    def forward(self, y_pred, y_true):
 
-    # normalize to sum to one
-    p_pred = y_pred / s_pred
+        seq_len = y_true.shape[1]
 
-    # total count poisson loss
-    poisson_term = F.poisson_nll_loss(
-        s_pred, s_true, log_input=False, eps=0, reduction="mean"
-    )  # B x T
-    # print (poisson_term,poisson_term.shape)
-    poisson_term /= seq_len
-    # print (poisson_term)
+        # epsilon protects against tiny/zero values
+        y_pred += self.epsilon
+        y_true += self.epsilon
 
-    # multinomial loss
-    pl_pred = torch.log(p_pred)  # B x L x T
-    multinomial_dot = -torch.multiply(y_true, pl_pred)  # B x L x T
-    multinomial_term = multinomial_dot.sum(dim=1)  # B x T
-    multinomial_term /= seq_len
+        # sum across lengths to normalise
+        s_pred = y_pred.sum(dim=1, keepdim=True)
+        s_true = y_true.sum(dim=1, keepdim=True)
 
-    # normalize to scale of 1:1 term ratio
-    loss_raw = multinomial_term + total_weight * poisson_term
-    if rescale:
-        loss_rescale = loss_raw * 2 / (1 + total_weight)
-    else:
-        loss_rescale = loss_raw
+        # normalise to sum to one
+        p_pred = y_pred / s_pred
+        
+        poisson_term = F.poisson_nll_loss(
+            s_pred, s_true, log_input=False, eps=0, reduction="mean"
+        )  # B x T
 
-    return loss_rescale.mean()
+        poisson_term /= seq_len
 
+        # multinomial loss
+        pl_pred = torch.log(p_pred)  # B x L x T
+        multinomial_dot = -torch.multiply(y_true, pl_pred)  # B x L x T
+        multinomial_term = multinomial_dot.sum(dim=1)  # B x T
+        multinomial_term /= seq_len
 
-def add_flashzoi_weight_decay(
-    model, weight_decay=1e-5, weight_decay_transformer=1e-8, skip_list=()
-):
-    decay = []
-    decay_transformer = []
-    no_decay = []
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            continue
-        if len(param.shape) == 1 or name in skip_list or "bias" in name:
-            accelerator.print("No decay", name)
-            no_decay.append(param)
-        elif "freq" in name:
-            accelerator.print("No decay", name)
-            no_decay.append(param)
-        elif "transformer" in name:
-            accelerator.print("Decay Transformer:", name)
-            decay_transformer.append(param)
+        # normalize to scale of 1:1 term ratio
+        loss_raw = multinomial_term + self.total_weight * poisson_term
+        if self.rescale:
+            loss_rescale = loss_raw * 2 / (1 + self.total_weight)
         else:
-            decay.append(param)
-    return [
-        {"params": no_decay, "weight_decay": 0.0},
-        {"params": decay, "weight_decay": weight_decay},
-        {"params": decay_transformer, "weight_decay": weight_decay_transformer},
-    ]
+            loss_rescale = loss_raw
+
+        return loss_rescale.mean()
+       
+
+class SparseMSELoss(nn.Module):
+    """
+    Loss to handle predictions of beta values in sparse sequences.
+    Combines BCE loss to find non-zero positions then applies MSE loss.
+    """
+    def __init__(self, bce_weight: float = 1.0, mse_weight: float = 1.0, eps: float = 1e-6):
+        super().__init__()
+        self.bce_weight = bce_weight
+        self.mse_weight = mse_weight
+        self.eps = eps # threshold to count as non-zero
+
+    def forward(self, y_pred, y_true):
+        # Is the site non-zero?
+        presence_true = (y_true > self.eps).float()
+
+         # BCE loss component
+        bce_loss = F.binary_cross_entropy_with_logits(y_pred, presence_true)
+        
+        # Masked MSE loss for value at non-zero positions
+        mask = presence_true.bool()
+        if mask.any():
+            mse_loss = F.mse_loss(torch.sigmoid(y_pred)[mask], y_true[mask])
+        else:
+            mse_loss = torch.tensor(0.0, device=y_pred.device)
+        
+        # Combine loss terms
+        loss = self.bce_weight * bce_loss + self.mse_weight * mse_loss
+        return loss
