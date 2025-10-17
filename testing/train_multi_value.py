@@ -99,7 +99,6 @@ training_args = TrainingArguments(
     seed=42,
     load_best_model_at_end=True,
     report_to=["wandb"],
-    input_names=["sequence"]
     label_names=["me_track"],
     dataloader_num_workers=4,
 )
