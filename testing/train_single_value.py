@@ -118,6 +118,7 @@ trainer.train()
 
 pred, true, metrics = trainer.predict(ds_test)
 
+model.cpu()
 merged_model = model.merge_and_unload()
 merged_model.save_pretrained(model_dir)
 
