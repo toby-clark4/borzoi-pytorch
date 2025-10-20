@@ -25,14 +25,14 @@ class BorzoiTrainer(Trainer):
             
             # Compute loss
             loss_fct = SparseMSELoss()
-            loss = loss_fct(logits, labels)
+            loss = loss_fct(logits.squeeze(1), labels)
         
         return (loss, logits, labels)
 
 data_dir = '../data/me_chip'
 res_dir = '../results/me_chip'
 model_base_path = '../assets'
-name = 'multi-meBorzoi_ernest_10k'
+name = 'multi-meBorzoi_ernest'
 model_dir = f'{model_base_path}/{name}'
 checkpoint_dir = f'{model_base_path}/checkpoints/{name}'
 os.makedirs(model_dir, exist_ok=True)

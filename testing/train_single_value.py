@@ -3,6 +3,7 @@ import os
 import torch
 import torch.nn as nn
 import pandas as pd
+import numpy as np
 from scipy.stats import pearsonr, spearmanr
 
 import pysam
@@ -105,7 +106,6 @@ training_args = TrainingArguments(
 )
 
 
-
 trainer = BorzoiTrainer(
     model=model,
     args=training_args,
@@ -123,7 +123,7 @@ model.cpu()
 merged_model = model.merge_and_unload()
 merged_model.save_pretrained(model_dir)
 
-pd.DataFrame({'pred': pred, 'true': true}).to_csv(f'{res_dir}/{name}.csv')
+pd.DataFrame({'pred': np.squeeze(pred), 'true': true}).to_csv(f'{res_dir}/{name}.csv')
 
 print(f'Test pearson r: {metrics['test_pearson']}')
 print(f'Test spearman r: {metrics['test_spearmanr']}')

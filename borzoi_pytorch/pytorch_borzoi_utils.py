@@ -159,12 +159,12 @@ class SparseMSELoss(nn.Module):
         presence_true = (y_true > self.eps).float()
 
          # BCE loss component
-        bce_loss = F.binary_cross_entropy_with_logits(y_pred, presence_true)
+        bce_loss = F.binary_cross_entropy(y_pred, presence_true)
         
         # Masked MSE loss for value at non-zero positions
         mask = presence_true.bool()
         if mask.any():
-            mse_loss = F.mse_loss(torch.sigmoid(y_pred)[mask], y_true[mask])
+            mse_loss = F.mse_loss(y_pred[mask], y_true[mask])
         else:
             mse_loss = torch.tensor(0.0, device=y_pred.device)
         

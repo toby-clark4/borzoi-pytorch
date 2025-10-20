@@ -215,6 +215,7 @@ class Borzoi(PreTrainedModel):
                 self.methylation_head = nn.Conv1d(in_channels=1920, out_channels=1, kernel_size=1)
 
         self.final_softplus = nn.Softplus()
+        self.sigmoid = nn.Sigmoid()
 
     def _init_weights(self, module):
         """Initialize the weights"""
@@ -367,11 +368,11 @@ class Borzoi(PreTrainedModel):
                         attentions=None,
                     )
                 else:
-                    out = self.final_softplus(self.methylation_head(x.float()))
+                    out = self.sigmoid(self.methylation_head(x.float())) # beta values are 0-1
 
                     loss_fct = SparseMSELoss()
                     if labels is not None:
-                        loss = loss_fct(out, labels)
+                        loss = loss_fct(out.squeeze(1), labels)
                     else:
                         loss = None
                     

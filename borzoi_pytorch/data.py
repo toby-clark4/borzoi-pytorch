@@ -8,7 +8,7 @@ from torch.utils.data import Dataset
 
 
 def extract_window(chrom: str, pos: int, window_size: int = 524288):
-    half_window = (window_size - 1) // 2
+    half_window = (window_size) // 2
     start = max(0, pos - half_window)
     end = pos + half_window
     return chrom, start, end
@@ -37,6 +37,26 @@ def process_sequence(genome, chrom: str, start: int, end: int, seq_len: int = 52
     onehot_sequence = np.transpose(onehot_sequence)  # Gives shape (4, seq_len)
 
     return onehot_sequence
+
+def bin_methylation(window_sites: pd.DataFrame, start_coordinate: int = 0, seq_len: int = 524_288, window_to_predict: int = 196_608, resolution: int=32):
+    """
+    Takes a dataframe of methylation sites in a window and maps to a numpy array
+    with methylation values binned at the specified resolution (in bp)
+    """
+    target_length = seq_len // resolution
+    out_channel = np.zeros(target_length)
+    window_sites['bin_loc'] = (window_sites.index - start_coordinate) // 32
+    for bin_loc, group in window_sites.groupby('bin_loc'):
+        out_channel[bin_loc] = group['mean_beta'].mean() # type: ignore
+
+    # Extract the centre window output by the model
+    _, start, end = extract_window('N', pos = target_length // 2, window_size = window_to_predict // resolution)
+    out_channel = out_channel[start:end]
+
+    return out_channel
+
+    
+
 
 
 class BorzoiDataCollator:
@@ -136,13 +156,15 @@ class BorzoiH5Dataset(Dataset):
         return self._file
 
     def __len__(self):
-        f = self._get_file()
-        n = len(f["sequence"])
-        f.close()
+        with h5py.File(self.h5_path, 'r') as f:
+            n = len(f["sequence"])
         return n
 
     def __getitem__(self, idx):
         f = self._get_file()
         x = f["sequence"][idx]
         y = f["me_track"][idx]
-        return torch.from_numpy(x).float(), torch.from_numpy(y).float()
+        return {
+            "x": torch.from_numpy(x).float(),
+            "labels": torch.from_numpy(y).float()
+        }
