@@ -357,7 +357,7 @@ class Borzoi(PreTrainedModel):
                         centre_feat.float()
                     )  
                     out = self.sigmoid(out) # Target is 0-1
-                    loss_fct = nn.HuberLoss()
+                    loss_fct = nn.MSELoss()
                     if labels is not None:
                         loss = loss_fct(out.squeeze(), labels.squeeze())
                     else:

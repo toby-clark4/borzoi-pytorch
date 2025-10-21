@@ -26,7 +26,7 @@ class BorzoiTrainer(Trainer):
             logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
             
             # Compute loss
-            loss_fct = nn.HuberLoss()
+            loss_fct = nn.MSELoss()
             loss = loss_fct(logits.squeeze(), labels.squeeze())
         
         return (loss, logits, labels)

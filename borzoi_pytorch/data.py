@@ -40,7 +40,9 @@ def process_sequence(genome, chrom: str, start: int, end: int, seq_len: int = 52
 
 
 def make_variant_onehot(genome, chrom: str, start: int, end: int, allele1: str, allele2: str, snp_pos: int, seq_len: int = 524288):
-
+    """
+    Takes information about a SNP variant and returns one-hot encoded sequences of each allele. 
+    """
     if start < 0:
         seq_dna = "N" * (-start) + genome.fetch(chrom, 0, end)
     else:
@@ -61,6 +63,9 @@ def make_variant_onehot(genome, chrom: str, start: int, end: int, allele1: str, 
 
 
 def process_variant(genome, chrom: str, start: int, end: int, snp_pos: int, allele1: str, allele2: str, seq_len: int = 524288):
+    """
+    Formats sequences to the right length, processes and transposes to the right shape.
+    """
     input_seq_len = end - start
     start -= (seq_len - input_seq_len) // 2
     end += (seq_len - input_seq_len) // 2
