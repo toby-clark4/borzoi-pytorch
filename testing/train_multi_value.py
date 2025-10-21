@@ -18,14 +18,15 @@ os.environ['WANDB_PROJECT'] = 'meBorzoi'
 class BorzoiTrainer(Trainer):
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
         labels = inputs.pop("labels")
-        
+
         with torch.no_grad():
             outputs = model(**inputs)
             logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
-            
+            # logits = logits.squeeze(0)
+
             # Compute loss
             loss_fct = SparseMSELoss()
-            loss = loss_fct(logits.squeeze(1), labels)
+            loss = loss_fct(logits, labels)
         
         return (loss, logits, labels)
 

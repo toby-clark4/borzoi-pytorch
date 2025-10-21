@@ -355,6 +355,7 @@ class Borzoi(PreTrainedModel):
                     out = self.methylation_head(
                         centre_feat.float()
                     )  # Can adjust with window around centre here.
+                    out = self.sigmoid(out)
                     loss_fct = nn.MSELoss()
                     if labels is not None:
                         loss = loss_fct(out.squeeze(), labels.squeeze())
@@ -369,10 +370,10 @@ class Borzoi(PreTrainedModel):
                     )
                 else:
                     out = self.sigmoid(self.methylation_head(x.float())) # beta values are 0-1
-
+                    out = out.squeeze(1)
                     loss_fct = SparseMSELoss()
                     if labels is not None:
-                        loss = loss_fct(out.squeeze(1), labels)
+                        loss = loss_fct(out, labels)
                     else:
                         loss = None
                     

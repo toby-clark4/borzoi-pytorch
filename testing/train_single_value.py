@@ -35,7 +35,7 @@ data_dir = '../data/me_chip'
 res_dir = '../results/me_chip'
 model_base_path = '../assets'
 genome_path = '/home/tobyc/data/borzoi-pytorch/data/ref_genomes/GRCh37/GCF_000001405.13/GCF_000001405.13_GRCh37_genomic.fna'
-name = 'meBorzoi_ernest_10k'
+name = 'meBorzoi_ernest_10k_sigmoid'
 model_dir = f'{model_base_path}/{name}'
 checkpoint_dir = f'{model_base_path}/checkpoints/{name}'
 os.makedirs(model_dir, exist_ok=True)
@@ -103,6 +103,7 @@ training_args = TrainingArguments(
     report_to=["wandb"],
     label_names=["chrom", "pos", "label"],
     dataloader_num_workers=4,
+    run_name=name,
 )
 
 

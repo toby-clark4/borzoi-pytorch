@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import torch
 import h5py
-import baskerville_dna as dna
+from . import baskerville_dna as dna
 from torch.utils.data import Dataset
 
 
@@ -38,6 +38,41 @@ def process_sequence(genome, chrom: str, start: int, end: int, seq_len: int = 52
 
     return onehot_sequence
 
+
+def make_variant_onehot(genome, chrom: str, start: int, end: int, allele1: str, allele2: str, snp_pos: int, seq_len: int = 524288):
+
+    if start < 0:
+        seq_dna = "N" * (-start) + genome.fetch(chrom, 0, end)
+    else:
+        seq_dna = genome.fetch(chrom, start, end)
+    
+    if len(seq_dna) < seq_len:
+        seq_dna += "N" * (seq_len - len(seq_dna))
+    
+    snp_idx = snp_pos - start
+
+    allele1_seq = seq_dna[:snp_idx] + allele1 + seq_dna[snp_idx+1:]
+    allele2_seq = seq_dna[:snp_idx] + allele2 + seq_dna[snp_idx+1:]
+
+    allele1_1hot = dna.dna_1hot(allele1_seq)
+    allele2_1hot = dna.dna_1hot(allele2_seq)
+
+    return allele1_1hot, allele2_1hot
+
+
+def process_variant(genome, chrom: str, start: int, end: int, snp_pos: int, allele1: str, allele2: str, seq_len: int = 524288):
+    input_seq_len = end - start
+    start -= (seq_len - input_seq_len) // 2
+    end += (seq_len - input_seq_len) // 2
+
+    allele1_1hot, allele2_1hot = make_variant_onehot(genome, chrom, start, end, allele1, allele2, snp_pos, seq_len)
+
+    allele1_1hot = np.transpose(allele1_1hot)
+    allele2_1hot = np.transpose(allele2_1hot)
+
+    return allele1_1hot, allele2_1hot
+
+
 def bin_methylation(window_sites: pd.DataFrame, start_coordinate: int = 0, seq_len: int = 524_288, window_to_predict: int = 196_608, resolution: int=32):
     """
     Takes a dataframe of methylation sites in a window and maps to a numpy array
@@ -54,10 +89,7 @@ def bin_methylation(window_sites: pd.DataFrame, start_coordinate: int = 0, seq_l
     out_channel = out_channel[start:end]
 
     return out_channel
-
-    
-
-
+  
 
 class BorzoiDataCollator:
     """
@@ -109,6 +141,62 @@ class BorzoiDataCollator:
         return batch
 
 
+class BorzoiVariantDataCollator(BorzoiDataCollator):
+    """
+    Hugging Face–compatible data collator for Borzoi fine-tuning.
+    """
+
+    def __init__(self, genome, seq_len=524288, device=None):
+        super().__init__(genome, seq_len, device)
+
+    def __call__(self, features):
+        """
+        Args:
+            features (list[dict]): Each example should have keys:
+                - 'chrom'
+                - 'snp_pos'
+                - 'cpg_pos'
+                - 'allele1'
+                - 'allele2'
+                - 'label' (optional)
+        Returns:
+            dict[str, torch.Tensor]
+        """
+        batch_inputs = []
+        batch_labels = []
+
+        for f in features:
+            chrom, snp_pos, cpg_pos, allele1, allele2 = f["chrom"], f["snp_pos"], f["cpg_pos"], f["allele1"], f["allele2"]
+            label = f.get("label", None)
+
+            # Compute start/end window
+            chrom, start, end = extract_window(chrom, cpg_pos, self.seq_len)
+
+            # Get one-hot encoded DNA sequence
+            allele1_1hot, allele2_1hot = process_variant(self.genome, chrom, start, end, snp_pos, allele1, allele2, self.seq_len)
+
+            # Convert to tensor and add batch dimension
+            x1 = torch.tensor(allele1_1hot, dtype=torch.float32).unsqueeze(0)  # (1, 4, L)
+            x2 = torch.tensor(allele2_1hot, dtype=torch.float32).unsqueeze(0)
+
+            batch_inputs.append(x1)
+            batch_inputs.append(x2)
+
+            if label is not None:
+                # Twice to match dim
+                batch_labels.append(torch.tensor(label, dtype=torch.float32))
+                batch_labels.append(torch.tensor(label, dtype=torch.float32))
+
+        # Stack into batch tensors
+        x_batch = torch.cat(batch_inputs, dim=0).to(self.device)  # (B, 4, L)
+        batch = {"x": x_batch}
+
+        if batch_labels:
+            batch["labels"] = torch.stack(batch_labels).to(self.device)
+
+        return batch
+    
+
 class BorzoiRegressionDataset(Dataset):
     """
     PyTorch Dataset to load chromosome and position data for single-value-prediction
@@ -136,6 +224,40 @@ class BorzoiRegressionDataset(Dataset):
         return {
             "chrom": self.chroms[idx],
             "pos": self.positions[idx],
+            "label": self.targets[idx],
+        }
+
+
+class BorzoiVariantDataset(Dataset):
+    def __init__(
+            self,
+            csv_path: str,
+            snp_pos_col: str = "pos",
+            cpg_pos_col: str = "MAPINFO",
+            target_col: str = "beta_a1",
+            subset_seqs: int = 0,
+    ):
+        self.data = pd.read_csv(csv_path)
+        if subset_seqs > 0:
+            self.data = self.data.sample(n=subset_seqs, random_state=42)
+        
+        self.chroms = self.data["REFSEQ_chr"]
+        self.snp_pos = self.data[snp_pos_col]
+        self.cpg_pos = self.data[cpg_pos_col]
+        self.targets = self.data[target_col]
+        self.a1s = self.data["allele1"]
+        self.a2s = self.data["allele2"]
+    
+    def __len__(self):
+        return len(self.chroms)
+    
+    def __getitem__(self, idx):
+        return {
+            "chrom": self.chroms[idx],
+            "snp_pos": self.snp_pos[idx],
+            "cpg_pos": self.cpg_pos[idx],
+            "allele1": self.a1s[idx],
+            "allele2": self.a2s[idx],
             "label": self.targets[idx],
         }
 
