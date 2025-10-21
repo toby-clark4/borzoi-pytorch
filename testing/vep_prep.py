@@ -50,4 +50,4 @@ refseq_map = {
 df_merged['REFSEQ_chr'] = df_merged['chr'].astype(str).map(refseq_map)
 df_merged = df_merged.dropna(subset=['REFSEQ_chr'])
 df_merged.reset_index(drop=True).to_csv('../data/godmc/processed_example.csv', index=False)
-df_merged.to_csv('../data/godmc/assoc_meta_all_filtered.csv')
+
