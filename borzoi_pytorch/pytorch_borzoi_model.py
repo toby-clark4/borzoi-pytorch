@@ -351,12 +351,13 @@ class Borzoi(PreTrainedModel):
         with torch.amp.autocast("cuda", enabled=False):
             if self.enable_methylation_head:
                 if self.single_target:
+                    # Can adjust with window around centre here.
                     centre_feat = x[:, :, self.centre_idx]  # (batch, 1920)
                     out = self.methylation_head(
                         centre_feat.float()
-                    )  # Can adjust with window around centre here.
-                    out = self.sigmoid(out)
-                    loss_fct = nn.MSELoss()
+                    )  
+                    out = self.sigmoid(out) # Target is 0-1
+                    loss_fct = nn.HuberLoss()
                     if labels is not None:
                         loss = loss_fct(out.squeeze(), labels.squeeze())
                     else:
