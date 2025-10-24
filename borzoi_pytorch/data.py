@@ -151,8 +151,9 @@ class BorzoiVariantDataCollator(BorzoiDataCollator):
     Hugging Face–compatible data collator for Borzoi fine-tuning.
     """
 
-    def __init__(self, genome, seq_len=524288, device=None):
+    def __init__(self, genome, siamese = False, seq_len=524288, device=None):
         super().__init__(genome, seq_len, device)
+        self.siamese = siamese
 
     def __call__(self, features):
         """
@@ -183,14 +184,19 @@ class BorzoiVariantDataCollator(BorzoiDataCollator):
             # Convert to tensor and add batch dimension
             x1 = torch.tensor(allele1_1hot, dtype=torch.float32).unsqueeze(0)  # (1, 4, L)
             x2 = torch.tensor(allele2_1hot, dtype=torch.float32).unsqueeze(0)
-
-            batch_inputs.append(x1)
-            batch_inputs.append(x2)
+            
+            if self.siamese == False: # concatenate inputs to be processed together.
+                x = torch.cat((x1, x2), dim=1)
+                batch_inputs.append(x)
+            else:
+                batch_inputs.append(x1)
+                batch_inputs.append(x2)
 
             if label is not None:
                 # Twice to match dim
                 batch_labels.append(torch.tensor(label, dtype=torch.float32))
-                batch_labels.append(torch.tensor(label, dtype=torch.float32))
+                if not self.siamese:
+                    batch_labels.append(torch.tensor(label, dtype=torch.float32))
 
         # Stack into batch tensors
         x_batch = torch.cat(batch_inputs, dim=0).to(self.device)  # (B, 4, L)
@@ -244,7 +250,7 @@ class BorzoiVariantDataset(Dataset):
     ):
         self.data = pd.read_csv(csv_path)
         if subset_seqs > 0:
-            self.data = self.data.sample(n=subset_seqs, random_state=42)
+            self.data = self.data.sample(n=subset_seqs, random_state=42).reset_index(drop=True)
         
         self.chroms = self.data["REFSEQ_chr"]
         self.snp_pos = self.data[snp_pos_col]

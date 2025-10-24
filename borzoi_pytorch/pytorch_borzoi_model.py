@@ -186,7 +186,7 @@ class Borzoi(PreTrainedModel):
             self.centre_idx = config.bins_to_return // 2
         else:
             self.crop = TargetLengthCrop(16384 - 32)  # as in Borzoi
-            self.centre_idx = 16384 // 2
+            self.centre_idx = (16384-32) // 2
         self.final_joined_convs = nn.Sequential(
             ConvBlock(in_channels=config.dim, out_channels=1920, kernel_size=1),
             nn.Dropout(0.1),
@@ -352,7 +352,7 @@ class Borzoi(PreTrainedModel):
             if self.enable_methylation_head:
                 if self.single_target:
                     # Can adjust with window around centre here.
-                    centre_feat = x[:, :, self.centre_idx]  # (batch, 1920)
+                    centre_feat = x[:, :, self.centre_idx: self.centre_idx + 2].mean(dim=-1)  # (batch, 1920)
                     out = self.methylation_head(
                         centre_feat.float()
                     )  
@@ -406,6 +406,76 @@ class Borzoi(PreTrainedModel):
             return out, x
 
         return out
+
+class SiameseBorzoi(Borzoi):
+    def __init__(self, config):
+        super().__init__(config)
+        self.methylation_head = nn.Sequential(
+                    nn.Linear(2 * 1920, 256),  # Conv output has shape (batch, 1920, n_bins) but we concatenate the two sequence outputs.
+                    nn.GELU(),
+                    nn.Linear(256, 1),
+                )
+        self.tanh = nn.Tanh()
+
+    def forward(
+        self,
+        x=None,
+        is_human=True,
+        data_parallel_training=False,
+        return_embeddings=False,
+        input_ids=None,
+        labels=None,
+        **kwargs,
+    ):
+        """
+        Performs the forward pass of the model.
+
+        Args:
+            x (torch.Tensor): Input concatenated DNA sequences tensor of shape (N, 8, L).
+            is_human (bool, optional): If True, use the human head; otherwise, use the mouse head. Defaults to True.
+            data_parallel_training (bool, optional): If True, perform forward pass specific to DDP. Defaults to False.
+
+        Returns:
+            torch.Tensor: Output tensor with shape (N, C, L), where C is the number of tracks.
+        """
+        if x is None:
+            x = input_ids.to(self.device)
+
+        assert x is not None, "Either x or input_ids must be provided"
+        x1 = x[:, :4, :]
+        x2 = x[:, 4:, :]
+
+
+
+        x1 = self.get_embs_after_crop(x1)
+        x1 = self.final_joined_convs(x1)
+
+        x2 = self.get_embs_after_crop(x2)
+        x2 = self.final_joined_convs(x2)
+
+        # disable autocast for more precision in final layer
+        with torch.amp.autocast("cuda", enabled=False):
+                            
+            # Can adjust with window around centre here.
+            x_combined = torch.cat([x1, x2], dim=1)
+            centre_feat = x_combined[:, :, self.centre_idx]
+
+            out = self.methylation_head(
+                centre_feat.float()
+            )  
+            out = self.tanh(out) # Target is -1 to 1
+            loss_fct = nn.MSELoss()
+            if labels is not None:
+                loss = loss_fct(out.squeeze(), labels.squeeze())
+            else:
+                loss = None
+
+            return SequenceClassifierOutput(
+                loss=loss,
+                logits=out,
+                hidden_states=None,
+                attentions=None,
+            )
 
 
 class AnnotatedBorzoi(Borzoi):
