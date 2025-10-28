@@ -1,4 +1,5 @@
 import os
+import random
 import numpy as np
 import pandas as pd
 import torch
@@ -27,14 +28,28 @@ def make_onehot(genome, chrom: str, start: int, end: int, seq_len: int = 524288)
     return seq_1hot
 
 
-def process_sequence(genome, chrom: str, start: int, end: int, seq_len: int = 524288):
+def process_sequence(genome, chrom: str, start: int, end: int, seq_len: int = 524288, augment = False):
     input_seq_len = end - start
     start -= (seq_len - input_seq_len) // 2
     end += (seq_len - input_seq_len) // 2
 
     onehot_sequence = make_onehot(genome, chrom, start, end, seq_len)
 
+    if augment:
+        onehot_sequence = get_shift_and_augment(onehot_sequence)
+
     onehot_sequence = np.transpose(onehot_sequence)  # Gives shape (4, seq_len)
+
+    return onehot_sequence
+
+def get_shift_and_augment(onehot_sequence):
+    if random.random() < 0.5:
+        fwdrc=True # Use forward
+    else:
+        fwdrc=False # Use reverse complement
+    shift = random.randint(-3, 3)
+
+    onehot_sequence = dna.hot1_augment(onehot_sequence, fwdrc=fwdrc, shift=shift)
 
     return onehot_sequence
 
@@ -101,10 +116,11 @@ class BorzoiDataCollator:
     Hugging Face–compatible data collator for Borzoi fine-tuning.
     """
 
-    def __init__(self, genome, seq_len=524288, device=None):
+    def __init__(self, genome, seq_len=524288, device=None, training=False):
         self.genome = genome
         self.seq_len = seq_len
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.training = training # Used to toggle data augmentation
 
     def __call__(self, features):
         """
@@ -127,7 +143,7 @@ class BorzoiDataCollator:
             chrom, start, end = extract_window(chrom, pos, self.seq_len)
 
             # Get one-hot encoded DNA sequence
-            seq_1hot = process_sequence(self.genome, chrom, start, end, self.seq_len)
+            seq_1hot = process_sequence(self.genome, chrom, start, end, self.seq_len, augment=self.training)
 
             # Convert to tensor and add batch dimension
             x = torch.tensor(seq_1hot, dtype=torch.float32).unsqueeze(0)  # (1, 4, L)
@@ -185,7 +201,7 @@ class BorzoiVariantDataCollator(BorzoiDataCollator):
             x1 = torch.tensor(allele1_1hot, dtype=torch.float32).unsqueeze(0)  # (1, 4, L)
             x2 = torch.tensor(allele2_1hot, dtype=torch.float32).unsqueeze(0)
             
-            if self.siamese == False: # concatenate inputs to be processed together.
+            if self.siamese: # concatenate inputs to be processed together.
                 x = torch.cat((x1, x2), dim=1)
                 batch_inputs.append(x)
             else:
@@ -199,11 +215,11 @@ class BorzoiVariantDataCollator(BorzoiDataCollator):
                     batch_labels.append(torch.tensor(label, dtype=torch.float32))
 
         # Stack into batch tensors
-        x_batch = torch.cat(batch_inputs, dim=0).to(self.device)  # (B, 4, L)
+        x_batch = torch.cat(batch_inputs, dim=0) # .to(self.device)  # (B, 4, L)
         batch = {"x": x_batch}
 
         if batch_labels:
-            batch["labels"] = torch.stack(batch_labels).to(self.device)
+            batch["labels"] = torch.stack(batch_labels) # .to(self.device)
 
         return batch
     
@@ -219,10 +235,11 @@ class BorzoiRegressionDataset(Dataset):
         pos_col: str = "MAPINFO",
         target_col: str = "mean_beta",
         subset_seqs: int = 0,
+        random_state: int = 42,
     ):
         self.data = pd.read_csv(csv_path)
         if subset_seqs > 0:
-            self.data = self.data.sample(n=subset_seqs, random_state=42)
+            self.data = self.data.sample(n=subset_seqs, random_state=random_state)
 
         self.chroms = self.data["REFSEQ_chr"].tolist()
         self.positions = self.data[pos_col].tolist()
@@ -247,10 +264,11 @@ class BorzoiVariantDataset(Dataset):
             cpg_pos_col: str = "MAPINFO",
             target_col: str = "beta_a1",
             subset_seqs: int = 0,
+            random_state: int = 42,
     ):
         self.data = pd.read_csv(csv_path)
         if subset_seqs > 0:
-            self.data = self.data.sample(n=subset_seqs, random_state=42).reset_index(drop=True)
+            self.data = self.data.sample(n=subset_seqs, random_state=random_state).reset_index(drop=True)
         
         self.chroms = self.data["REFSEQ_chr"]
         self.snp_pos = self.data[snp_pos_col]

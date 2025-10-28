@@ -413,10 +413,10 @@ class SiameseBorzoi(Borzoi):
         self.methylation_head = nn.Sequential(
                     nn.Linear(2 * 1920, 256),  # Conv output has shape (batch, 1920, n_bins) but we concatenate the two sequence outputs.
                     nn.GELU(),
+                    nn.Dropout(0.2),
                     nn.Linear(256, 1),
                 )
-        self.tanh = nn.Tanh()
-
+        
     def forward(
         self,
         x=None,
@@ -446,7 +446,6 @@ class SiameseBorzoi(Borzoi):
         x2 = x[:, 4:, :]
 
 
-
         x1 = self.get_embs_after_crop(x1)
         x1 = self.final_joined_convs(x1)
 
@@ -458,12 +457,11 @@ class SiameseBorzoi(Borzoi):
                             
             # Can adjust with window around centre here.
             x_combined = torch.cat([x1, x2], dim=1)
-            centre_feat = x_combined[:, :, self.centre_idx]
+            centre_feat = x_combined[:, :, self.centre_idx: self.centre_idx + 2].mean(dim=-1)
 
             out = self.methylation_head(
                 centre_feat.float()
-            )  
-            out = self.tanh(out) # Target is -1 to 1
+            )
             loss_fct = nn.MSELoss()
             if labels is not None:
                 loss = loss_fct(out.squeeze(), labels.squeeze())
