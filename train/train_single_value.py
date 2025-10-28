@@ -30,12 +30,12 @@ class BorzoiTrainer(Trainer):
             loss = loss_fct(logits.squeeze(), labels.squeeze())
         
         return (loss, logits, labels)
-
+    
 data_dir = '../data/me_chip'
 res_dir = '../results/me_chip'
 model_base_path = '../assets'
 genome_path = '/home/tobyc/data/borzoi-pytorch/data/ref_genomes/GRCh37/GCF_000001405.13/GCF_000001405.13_GRCh37_genomic.fna'
-name = 'meBorzoi_ernest_10k_2window'
+name = 'meBorzoi_ernest_10k_augmented'
 model_dir = f'{model_base_path}/{name}'
 checkpoint_dir = f'{model_base_path}/checkpoints/{name}'
 os.makedirs(model_dir, exist_ok=True)
@@ -54,7 +54,8 @@ ds_train = BorzoiRegressionDataset(f'{data_dir}/ernest_train.csv', subset_seqs=1
 ds_val = BorzoiRegressionDataset(f'{data_dir}/ernest_val.csv', subset_seqs=1_000)
 ds_test = BorzoiRegressionDataset(f'{data_dir}/ernest_test.csv', subset_seqs=1_000)
 
-data_collator = BorzoiDataCollator(pysam.FastaFile(genome_path), seq_len=524288, device=device)
+genome = pysam.FastaFile(genome_path)
+data_collator = BorzoiDataCollator(genome, model, seq_len=524288, device=device)
 
 lora_config = LoraConfig(
     task_type="SEQ_CLS",

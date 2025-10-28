@@ -36,7 +36,7 @@ def process_sequence(genome, chrom: str, start: int, end: int, seq_len: int = 52
     onehot_sequence = make_onehot(genome, chrom, start, end, seq_len)
 
     if augment:
-        onehot_sequence = get_shift_and_augment(onehot_sequence)
+        onehot_sequence = get_shift_and_augment(onehot_sequence).copy()
 
     onehot_sequence = np.transpose(onehot_sequence)  # Gives shape (4, seq_len)
 
@@ -116,11 +116,11 @@ class BorzoiDataCollator:
     Hugging Face–compatible data collator for Borzoi fine-tuning.
     """
 
-    def __init__(self, genome, seq_len=524288, device=None, training=False):
+    def __init__(self, genome, model, seq_len=524288, device=None):
         self.genome = genome
         self.seq_len = seq_len
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        self.training = training # Used to toggle data augmentation
+        self.model = model # Used to toggle data augmentation
 
     def __call__(self, features):
         """
@@ -143,7 +143,8 @@ class BorzoiDataCollator:
             chrom, start, end = extract_window(chrom, pos, self.seq_len)
 
             # Get one-hot encoded DNA sequence
-            seq_1hot = process_sequence(self.genome, chrom, start, end, self.seq_len, augment=self.training)
+            # Apply augmentation only during training
+            seq_1hot = process_sequence(self.genome, chrom, start, end, self.seq_len, augment=self.model.training)
 
             # Convert to tensor and add batch dimension
             x = torch.tensor(seq_1hot, dtype=torch.float32).unsqueeze(0)  # (1, 4, L)
