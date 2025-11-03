@@ -35,7 +35,7 @@ data_dir = '../data/me_chip'
 res_dir = '../results/me_chip'
 model_base_path = '../assets'
 genome_path = '/home/tobyc/data/borzoi-pytorch/data/ref_genomes/GRCh37/GCF_000001405.13/GCF_000001405.13_GRCh37_genomic.fna'
-name = 'meBorzoi_ernest_10k_augmented'
+name = 'meBorzoi_ernest_10k_train_convs'
 model_dir = f'{model_base_path}/{name}'
 checkpoint_dir = f'{model_base_path}/checkpoints/{name}'
 os.makedirs(model_dir, exist_ok=True)
@@ -62,7 +62,7 @@ lora_config = LoraConfig(
     r=16,
     lora_alpha=16,
     target_modules = ['to_q', 'to_k', 'to_v'],
-    modules_to_save = ['methylation_head'],
+    modules_to_save = ['methylation_head', 'final_joined_convs'],
     lora_dropout=0.1,
 )
 

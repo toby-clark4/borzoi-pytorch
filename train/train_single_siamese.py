@@ -35,7 +35,7 @@ data_dir = '../data/siamese'
 res_dir = '../results/siamese'
 model_base_path = '../assets'
 genome_path = '/home/tobyc/data/borzoi-pytorch/data/ref_genomes/GRCh37/GCF_000001405.13/GCF_000001405.13_GRCh37_genomic.fna'
-name = 'SiameseBorzoi_ernest_10k_head_dropout'
+name = 'SiameseMeBorzoi_ernest_10k'
 model_dir = f'{model_base_path}/{name}'
 checkpoint_dir = f'{model_base_path}/checkpoints/{name}'
 os.makedirs(model_dir, exist_ok=True)
@@ -44,10 +44,10 @@ os.makedirs(res_dir, exist_ok=True)
 
 device = torch.device('cuda')
 
-config = BorzoiConfig.from_pretrained('johahi/borzoi-replicate-0')
+config = BorzoiConfig.from_pretrained(f'{model_base_path}/meBorzoi_ernest_10k_augmented')
 config.enable_human_head = False
 config.enable_methylation_head = True
-model = SiameseBorzoi.from_pretrained('johahi/borzoi-replicate-0', config=config)
+model = SiameseBorzoi.from_pretrained(f'{model_base_path}/meBorzoi_ernest_10k_augmented', config=config)
 model.to(device) # type: ignore
 
 random_state=42
@@ -55,14 +55,14 @@ ds_train = BorzoiVariantDataset(f'{data_dir}/1k_train.csv', subset_seqs=10_000, 
 ds_val = BorzoiVariantDataset(f'{data_dir}/1k_val.csv', subset_seqs=1_000, random_state=random_state)
 ds_test = BorzoiVariantDataset(f'{data_dir}/1k_test.csv', subset_seqs=1_000, random_state=random_state)
 
-data_collator = BorzoiVariantDataCollator(pysam.FastaFile(genome_path), siamese=True, seq_len=524288, device=device)
+data_collator = BorzoiVariantDataCollator(pysam.FastaFile(genome_path), model, siamese=True, seq_len=524288, device=device)
 
 lora_config = LoraConfig(
     task_type="SEQ_CLS",
     r=16,
     lora_alpha=16,
     target_modules = ['to_q', 'to_k', 'to_v'],
-    modules_to_save = ['methylation_head'],
+    modules_to_save = ['beta_head'],
     lora_dropout=0.1,
 )
 

@@ -168,8 +168,8 @@ class BorzoiVariantDataCollator(BorzoiDataCollator):
     Hugging Face–compatible data collator for Borzoi fine-tuning.
     """
 
-    def __init__(self, genome, siamese = False, seq_len=524288, device=None):
-        super().__init__(genome, seq_len, device)
+    def __init__(self, genome, model, siamese = False, seq_len=524288, device=None):
+        super().__init__(genome, model, seq_len, device)
         self.siamese = siamese
 
     def __call__(self, features):

@@ -410,7 +410,7 @@ class Borzoi(PreTrainedModel):
 class SiameseBorzoi(Borzoi):
     def __init__(self, config):
         super().__init__(config)
-        self.methylation_head = nn.Sequential(
+        self.beta_head = nn.Sequential(
                     nn.Linear(2 * 1920, 256),  # Conv output has shape (batch, 1920, n_bins) but we concatenate the two sequence outputs.
                     nn.GELU(),
                     nn.Dropout(0.2),
@@ -459,7 +459,7 @@ class SiameseBorzoi(Borzoi):
             x_combined = torch.cat([x1, x2], dim=1)
             centre_feat = x_combined[:, :, self.centre_idx: self.centre_idx + 2].mean(dim=-1)
 
-            out = self.methylation_head(
+            out = self.beta_head(
                 centre_feat.float()
             )
             loss_fct = nn.MSELoss()
