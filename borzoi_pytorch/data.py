@@ -7,6 +7,32 @@ import h5py
 from . import baskerville_dna as dna
 from torch.utils.data import Dataset
 
+refseq_map = {
+    "1": "NC_000001.10",
+    "2": "NC_000002.11",
+    "3": "NC_000003.11",
+    "4": "NC_000004.11",
+    "5": "NC_000005.9",
+    "6": "NC_000006.11",
+    "7": "NC_000007.13",
+    "8": "NC_000008.10",
+    "9": "NC_000009.11",
+    "10": "NC_000010.10",
+    "11": "NC_000011.9",
+    "12": "NC_000012.11",
+    "13": "NC_000013.10",
+    "14": "NC_000014.8",
+    "15": "NC_000015.9",
+    "16": "NC_000016.9",
+    "17": "NC_000017.10",
+    "18": "NC_000018.9",
+    "19": "NC_000019.9",
+    "20": "NC_000020.10",
+    "21": "NC_000021.8",
+    "22": "NC_000022.10",
+    "X": "NC_000023.10",
+    "Y": "NC_000024.9"
+}
 
 def extract_window(chrom: str, pos: int, window_size: int = 524288):
     half_window = (window_size) // 2
@@ -54,30 +80,56 @@ def get_shift_and_augment(onehot_sequence):
     return onehot_sequence
 
 
-def make_variant_onehot(genome, chrom: str, start: int, end: int, allele1: str, allele2: str, snp_pos: int, seq_len: int = 524288):
+def make_variant_onehot(genome, chrom: str, start: int, end: int, allele1: str, allele2: str, snp_pos: int, seq_len: int = 524288, chrom_seq = None):
     """
     Takes information about a SNP variant and returns one-hot encoded sequences of each allele. 
     """
-    if start < 0:
-        seq_dna = "N" * (-start) + genome.fetch(chrom, 0, end)
-    else:
-        seq_dna = genome.fetch(chrom, start, end)
+    # Determine actual fetch range
+    fetch_start = max(0, start)
     
+    # Get sequence
+    if chrom_seq is None:
+        seq_dna = genome.fetch(chrom, fetch_start, end)
+    else:
+        seq_dna = chrom_seq[fetch_start:end]
+    
+    # Pad sequence at start if needed
+    if start < 0:
+        seq_dna = "N" * (-start) + seq_dna
+    
+    # Pad sequence at end if needed
     if len(seq_dna) < seq_len:
         seq_dna += "N" * (seq_len - len(seq_dna))
     
+    # ONE-HOT ENCODE ONCE
+    base_1hot = dna.dna_1hot_efficient(seq_dna)
+    
     snp_idx = snp_pos - start
-
-    allele1_seq = seq_dna[:snp_idx] + allele1 + seq_dna[snp_idx+1:]
-    allele2_seq = seq_dna[:snp_idx] + allele2 + seq_dna[snp_idx+1:]
-
-    allele1_1hot = dna.dna_1hot(allele1_seq)
-    allele2_1hot = dna.dna_1hot(allele2_seq)
+    
+    # Copy and modify at SNP position
+    allele1_1hot = base_1hot.copy()
+    allele1_1hot[snp_idx, :] = encode_base(allele1)
+    
+    allele2_1hot = base_1hot.copy()
+    allele2_1hot[snp_idx, :] = encode_base(allele2)
 
     return allele1_1hot, allele2_1hot
 
 
-def process_variant(genome, chrom: str, start: int, end: int, snp_pos: int, allele1: str, allele2: str, seq_len: int = 524288):
+def encode_base(base):
+    """Convert single base to one-hot vector [A, C, G, T]"""
+    mapping = {
+        'A': np.array([1, 0, 0, 0], dtype=np.uint8),
+        'C': np.array([0, 1, 0, 0], dtype=np.uint8),
+        'G': np.array([0, 0, 1, 0], dtype=np.uint8),
+        'T': np.array([0, 0, 0, 1], dtype=np.uint8),
+        'N': np.array([0, 0, 0, 0], dtype=np.uint8),
+    }
+    return mapping.get(base.upper(), mapping['N'])
+
+
+
+def process_variant(genome, chrom: str, start: int, end: int, snp_pos: int, allele1: str, allele2: str, seq_len: int = 524288, chrom_seq = None):
     """
     Formats sequences to the right length, processes and transposes to the right shape.
     """
@@ -85,7 +137,7 @@ def process_variant(genome, chrom: str, start: int, end: int, snp_pos: int, alle
     start -= (seq_len - input_seq_len) // 2
     end += (seq_len - input_seq_len) // 2
 
-    allele1_1hot, allele2_1hot = make_variant_onehot(genome, chrom, start, end, allele1, allele2, snp_pos, seq_len)
+    allele1_1hot, allele2_1hot = make_variant_onehot(genome, chrom, start, end, allele1, allele2, snp_pos, seq_len, chrom_seq)
 
     allele1_1hot = np.transpose(allele1_1hot)
     allele2_1hot = np.transpose(allele2_1hot)
@@ -234,7 +286,7 @@ class BorzoiRegressionDataset(Dataset):
         self,
         csv_path: str,
         pos_col: str = "MAPINFO",
-        target_col: str = "mean_beta",
+        target_col: str = "mean_beta", # is_me for classification
         subset_seqs: int = 0,
         random_state: int = 42,
     ):
@@ -316,7 +368,9 @@ class BorzoiH5Dataset(Dataset):
         f = self._get_file()
         x = f["sequence"][idx]
         y = f["me_track"][idx]
+        snp = f["snp"][idx]
         return {
             "x": torch.from_numpy(x).float(),
-            "labels": torch.from_numpy(y).float()
+            "labels": torch.from_numpy(y).float(),
+            "snp": snp
         }

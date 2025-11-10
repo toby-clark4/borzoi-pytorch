@@ -204,6 +204,7 @@ class Borzoi(PreTrainedModel):
         # Add a simple methylation head
         self.enable_methylation_head = getattr(config, "enable_methylation_head", False)
         self.single_target = getattr(config, "single_target", True)
+        self.problem_type = getattr(config, "problem_type", "regression")
         if self.enable_methylation_head:
             if self.single_target:
                 self.methylation_head = nn.Sequential(
@@ -355,9 +356,13 @@ class Borzoi(PreTrainedModel):
                     centre_feat = x[:, :, self.centre_idx: self.centre_idx + 2].mean(dim=-1)  # (batch, 1920)
                     out = self.methylation_head(
                         centre_feat.float()
-                    )  
-                    out = self.sigmoid(out) # Target is 0-1
-                    loss_fct = nn.MSELoss()
+                    )
+                    if self.problem_type == "regression":  
+                        out = self.sigmoid(out) # Target is 0-1
+                        loss_fct = nn.MSELoss()
+                    else:
+                        loss_fct = nn.BCEWithLogitsLoss()
+
                     if labels is not None:
                         loss = loss_fct(out.squeeze(), labels.squeeze())
                     else:
@@ -372,7 +377,11 @@ class Borzoi(PreTrainedModel):
                 else:
                     out = self.sigmoid(self.methylation_head(x.float())) # beta values are 0-1
                     out = out.squeeze(1)
-                    loss_fct = SparseMSELoss()
+                    mask = labels != 0
+                    out = out[mask]
+                    labels = labels[mask]
+                    # loss_fct = SparseMSELoss()
+                    loss_fct = nn.MSELoss()
                     if labels is not None:
                         loss = loss_fct(out, labels)
                     else:

@@ -17,15 +17,17 @@ os.environ['WANDB_PROJECT'] = 'meBorzoi'
     
 class BorzoiTrainer(Trainer):
     def prediction_step(self, model, inputs, prediction_loss_only, ignore_keys=None):
-        labels = inputs.pop("labels")
+        labels = inputs['labels']
 
         with torch.no_grad():
             outputs = model(**inputs)
             logits = outputs.logits if hasattr(outputs, 'logits') else outputs[0]
-            # logits = logits.squeeze(0)
-
+            mask = labels != 0
+            labels = labels[mask]
             # Compute loss
-            loss_fct = SparseMSELoss()
+            # loss_fct = SparseMSELoss()
+            
+            loss_fct = nn.MSELoss()
             loss = loss_fct(logits, labels)
         
         return (loss, logits, labels)
@@ -33,7 +35,7 @@ class BorzoiTrainer(Trainer):
 data_dir = '../data/me_chip'
 res_dir = '../results/me_chip'
 model_base_path = '../assets'
-name = 'multi-meBorzoi_ernest'
+name = 'multi-meBorzoi_ernest_mse'
 model_dir = f'{model_base_path}/{name}'
 checkpoint_dir = f'{model_base_path}/checkpoints/{name}'
 os.makedirs(model_dir, exist_ok=True)
@@ -58,28 +60,38 @@ lora_config = LoraConfig(
     r=16,
     lora_alpha=16,
     target_modules = ['to_q', 'to_k', 'to_v'],
-    modules_to_save = ['methylation_head'],
+    modules_to_save = ['methylation_head', 'final_joined_convs'],
     lora_dropout=0.1,
 )
 
 model = get_peft_model(model, lora_config)
+
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     logits = torch.tensor(logits)
     labels = torch.tensor(labels)
 
-    # Apply sigmoid if model outputs logits
+    # Convert logits to probabilities
     logits = torch.sigmoid(logits)
 
-    # Compute per-sequence Pearson r
     batch_size = logits.shape[0]
     r_values = []
-    for i in range(batch_size):
-        r = pearson_corrcoef(logits[i], labels[i])
-        r_values.append(r)
 
-    r_mean = torch.stack(r_values).mean()
+    for i in range(batch_size):
+        # Create a mask where labels are non-zero
+        mask = labels[i] != 0
+
+        if mask.sum() > 1:  # need at least 2 points for correlation
+            r = pearson_corrcoef(logits[i][mask], labels[i][mask])
+            r_values.append(r)
+        else:
+            # If no valid points, append NaN or 0
+            r_values.append(torch.tensor(float('nan')))
+
+    # Stack results and take mean over valid entries
+    r_values = torch.stack(r_values)
+    r_mean = torch.nanmean(r_values)  # ignores NaNs safely
 
     return {"mean_pearson": r_mean.item()}
    
@@ -122,8 +134,6 @@ model.cpu()
 merged_model = model.merge_and_unload()
 merged_model.save_pretrained(model_dir)
 
-pred = pred.detach().cpu().numpy()
-true = true.detach().cpu().numpy()
 np.savez(f"{res_dir}/{name}.npz", pred=pred, true=true)
 
 print(f'Test pearson r: {metrics['test_mean_pearson']}')

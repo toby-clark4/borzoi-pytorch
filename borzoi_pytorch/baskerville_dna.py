@@ -130,6 +130,62 @@ def dna_1hot_index(seq: str, n_sample: bool = False):
     return seq_code
 
 
+def dna_1hot_efficient(seq: str, seq_len: int = None, n_uniform: bool = False, n_sample: bool = False):
+    """Vectorized version of dna_1hot - much faster for long sequences.
+    
+    Args:
+      seq (str): DNA sequence.
+      seq_len (int): length to extend/trim sequences to.
+      n_uniform (bool): represent N's as 0.25, forcing float16,
+      n_sample (bool): sample ACGT for N
+
+    Returns:
+      seq_code (np.array): 1-hot encoding of DNA sequence (4, seq_len).
+    """
+    if seq_len is None:
+        seq_len = len(seq)
+        seq_start = 0
+    else:
+        if seq_len <= len(seq):
+            # trim the sequence
+            seq_trim = (len(seq) - seq_len) // 2
+            seq = seq[seq_trim : seq_trim + seq_len]
+            seq_start = 0
+        else:
+            seq_start = (seq_len - len(seq)) // 2
+
+    seq = seq.upper()
+
+    # Initialize output
+    if n_uniform:
+        seq_code = np.zeros((seq_len, 4), dtype="float16")
+    else:
+        seq_code = np.zeros((seq_len, 4), dtype="uint8")  # Changed from bool to uint8
+
+    # Convert sequence to numpy array of bytes
+    seq_array = np.frombuffer(seq.encode('ascii'), dtype=np.uint8)
+    
+    # Vectorized mapping
+    # A=65, C=67, G=71, T=84 in ASCII
+    seq_code[seq_start:seq_start+len(seq), 0] = (seq_array == 65)  # A
+    seq_code[seq_start:seq_start+len(seq), 1] = (seq_array == 67)  # C
+    seq_code[seq_start:seq_start+len(seq), 2] = (seq_array == 71)  # G
+    seq_code[seq_start:seq_start+len(seq), 3] = (seq_array == 84)  # T
+    
+    # Handle N's
+    if n_uniform or n_sample:
+        is_n = ~((seq_array == 65) | (seq_array == 67) | (seq_array == 71) | (seq_array == 84))
+        n_indices = np.where(is_n)[0] + seq_start
+        
+        if n_uniform:
+            seq_code[n_indices, :] = 0.25
+        elif n_sample:
+            random_bases = np.random.randint(0, 4, len(n_indices))
+            seq_code[n_indices, random_bases] = 1
+
+    return seq_code
+
+
 def hot1_augment(Xb, fwdrc: bool = True, shift: int = 0):
     """Transform a batch of one hot coded sequences to augment training.
 
