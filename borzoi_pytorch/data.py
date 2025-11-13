@@ -1,3 +1,4 @@
+import ast
 import os
 import random
 import numpy as np
@@ -161,6 +162,31 @@ def bin_methylation(window_sites: pd.DataFrame, start_coordinate: int = 0, seq_l
     out_channel = out_channel[start:end]
 
     return out_channel
+
+def bin_methylation_on_fly(window_sites: list, mean_betas: list, start_coordinate: int = 0, seq_len: int = 524_288, window_to_predict: int = 196_608, resolution: int=32):
+    """
+    Takes a list of methylation site positions and corresponding mean beta values in a window and maps to a numpy array
+    with methylation values binned at the specified resolution (in bp)
+    """
+    target_length = seq_len // resolution
+    out_channel = np.zeros(target_length)
+    bin_locs = [(int(pos) - start_coordinate) // 32 for pos in window_sites]
+    bin_dict = {}
+    for bin_loc, beta in zip(bin_locs, mean_betas):
+        if bin_loc not in bin_dict:
+            bin_dict[bin_loc] = []
+        bin_dict[bin_loc].append(beta)
+    
+    for bin_loc, betas in bin_dict.items():
+        out_channel[bin_loc] = np.mean(betas)
+
+    # Extract the centre window output by the model
+    _, start, end = extract_window('N', pos = target_length // 2, window_size = window_to_predict // resolution)
+    out_channel = out_channel[start:end]
+
+    return out_channel
+
+
   
 
 class BorzoiDataCollator:
@@ -277,6 +303,73 @@ class BorzoiVariantDataCollator(BorzoiDataCollator):
         return batch
     
 
+class BorzoiVariantMultiDataCollator(BorzoiDataCollator):
+    """
+    Hugging Face–compatible data collator for Borzoi fine-tuning with multiple CpG sites per SNP.
+    """
+
+    def __init__(self, genome, model, seq_len=524288, device=None):
+        super().__init__(genome, model, seq_len, device)
+
+    def __call__(self, features):
+        """
+        Args:
+            features (list[dict]): Each example should have keys:
+                - 'chrom'
+                - 'snp_pos'
+                - 'cpg_pos'
+                - 'allele1'
+                - 'allele2'
+                - 'label' (optional)
+        Returns:
+            dict[str, torch.Tensor]
+        """
+        batch_inputs = []
+        batch_labels = []
+
+        for f in features:
+            chrom, snp_pos, cpg_pos, allele1, allele2 = f["chrom"], f["snp_pos"], f["cpg_pos"], f["allele1"], f["allele2"]
+            label = f.get("label", None)
+
+            # Compute start/end window
+            chrom, start, end = extract_window(chrom, snp_pos, self.seq_len)
+
+            # Get one-hot encoded DNA sequence
+            allele1_1hot, allele2_1hot = process_variant(self.genome, chrom, start, end, snp_pos, allele1, allele2, self.seq_len)
+
+            # Convert to tensor and add batch dimension
+            x1 = torch.tensor(allele1_1hot, dtype=torch.float32).unsqueeze(0)  # (1, 4, L)
+            x2 = torch.tensor(allele2_1hot, dtype=torch.float32).unsqueeze(0)
+            
+            batch_inputs.append(x1)
+            batch_inputs.append(x2)
+            if label is not None:
+                out_channel = bin_methylation_on_fly(
+                    cpg_pos,
+                    label,
+                    start_coordinate=start,
+                    seq_len=self.seq_len,
+                    resolution=32
+                )
+
+                out_channel = torch.tensor(out_channel, dtype=torch.float32)
+
+                
+                # Twice to match dim
+                batch_labels.append(out_channel)
+                batch_labels.append(out_channel)
+
+
+        # Stack into batch tensors
+        x_batch = torch.cat(batch_inputs, dim=0) # .to(self.device)  # (B, 4, L)
+        batch = {"x": x_batch}
+
+        if batch_labels:
+            batch["labels"] = torch.stack(batch_labels) # .to(self.device)
+
+        return batch   
+  
+
 class BorzoiRegressionDataset(Dataset):
     """
     PyTorch Dataset to load chromosome and position data for single-value-prediction
@@ -318,8 +411,13 @@ class BorzoiVariantDataset(Dataset):
             target_col: str = "beta_a1",
             subset_seqs: int = 0,
             random_state: int = 42,
-    ):
-        self.data = pd.read_csv(csv_path)
+            multi_value: bool = True
+    ):  
+        if multi_value:
+            self.data = pd.read_csv(csv_path, converters={cpg_pos_col: ast.literal_eval, target_col: ast.literal_eval})
+        else:
+            self.data = pd.read_csv(csv_path)
+
         if subset_seqs > 0:
             self.data = self.data.sample(n=subset_seqs, random_state=random_state).reset_index(drop=True)
         

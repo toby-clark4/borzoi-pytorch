@@ -1,20 +1,52 @@
 import pandas as pd
-import numpy as np
-import h5py
-import pysam
-import gc
-from tqdm import tqdm
-from borzoi_pytorch.data import extract_window, process_variant, bin_methylation, refseq_map
+# import numpy as np
+# import h5py
+# import pysam
+# import gc
+# from tqdm import tqdm
+# from borzoi_pytorch.data import extract_window, process_variant, bin_methylation, refseq_map
 
 
-target_len = 6144 # to match Borzoi output resolution.
-seq_len = 524_288
+# target_len = 6144 # to match Borzoi output resolution.
+# seq_len = 524_288
 
-mean_betas = pd.read_csv('../data/me_chip/annotated_beta_values.csv', index_col=0).set_index('MAPINFO')
+mean_betas = pd.read_csv('../data/me_chip/annotated_beta_values.csv', index_col=0)
+mean_betas = mean_betas[['REFSEQ_chr', 'mean_beta', 'MAPINFO']]
 
-genome_path = '/home/tobyc/data/borzoi-pytorch/data/ref_genomes/GRCh37/GCF_000001405.13/GCF_000001405.13_GRCh37_genomic.fna'
-genome = pysam.FastaFile(genome_path)
+data = pd.read_csv('../data/godmc/assoc_meta_all_filtered.csv', index_col=0)
 
+data = data[['REFSEQ_chr', 'MAPINFO', 'snp', 'pos', 'allele1', 'allele2']]
+
+merged = data.merge(
+    mean_betas,
+    on=['REFSEQ_chr', 'MAPINFO'],
+    how='inner',     
+)
+
+per_snp = (
+    merged
+    .groupby(['snp', 'REFSEQ_chr'], as_index=False)
+    .agg({
+        'MAPINFO': list,
+        'mean_beta': list,
+        'pos': 'first',
+        'allele1': 'first',
+        'allele2': 'first'
+    })
+)
+
+per_snp = per_snp.rename(columns={
+    'MAPINFO': 'cpg_locations',
+    'mean_beta': 'mean_betas'
+})
+
+print(len(per_snp))
+
+per_snp.to_csv('../data/godmc/snps_for_vep_multi.csv.gz', compression='gzip')
+
+
+
+'''
 with h5py.File(f"../data/godmc/snps.h5", "w") as f:
     f.create_dataset(
         "sequence",
@@ -35,7 +67,7 @@ with h5py.File(f"../data/godmc/snps.h5", "w") as f:
     f.create_dataset("chromosome", shape=(0,), maxshape=(None,), dtype=h5py.string_dtype(encoding='utf-8'))
     f.create_dataset("snp", shape=(0,), maxshape=(None,), dtype=h5py.string_dtype(encoding='utf-8'))
 
-BATCH_SIZE = 1000  # Write every 1000 SNPs (adjust based on available RAM)
+BATCH_SIZE = 1500  # Write every 1000 SNPs (adjust based on available RAM)
 
 def _write_batch(f, seqs, targets, chroms, snps):
     """Helper function to write a batch to HDF5"""
@@ -48,7 +80,9 @@ def _write_batch(f, seqs, targets, chroms, snps):
     snps_arr = np.array(snps, dtype=h5py.string_dtype(encoding="utf-8"))
 
     n_new = seqs_arr.shape[0]
+    
     start_idx = f["sequence"].shape[0]
+
 
     for name, data_arr in zip(['sequence', 'me_track', 'chromosome', 'snp'], 
                                [seqs_arr, targets_arr, chroms_arr, snps_arr]):
@@ -56,7 +90,7 @@ def _write_batch(f, seqs, targets, chroms, snps):
         f[name][-n_new:] = data_arr
 
 
-with h5py.File(f"../data/me_chip/snps.h5", "a") as f:
+with h5py.File(f"../data/godmc/snps.h5", "a") as f:
     for chrom in refseq_map.values():
         print(f"Processing chromosome {chrom}")
 
@@ -80,7 +114,7 @@ with h5py.File(f"../data/me_chip/snps.h5", "a") as f:
             chrom, start, end = extract_window(chrom, snp_pos, seq_len)
             allele1_seq, allele2_seq = process_variant(
                 genome, chrom, start, end, snp_pos, 
-                row['allele1'], row['allele2'], chrom_seq=chr_sequence
+                row['allele1'], row['allele2']
             )
             out_channel = bin_methylation(me_vals, start_coordinate=start, seq_len=seq_len, resolution=32)
             
@@ -102,6 +136,8 @@ with h5py.File(f"../data/me_chip/snps.h5", "a") as f:
         # Explicitly free memory
         del chr_sequence, chr_data, chr_me
         gc.collect()
+
+'''
 """
 with h5py.File(f"../data/me_chip/snps.h5", "a") as f:
     for chrom in refseq_map.values():

@@ -160,7 +160,7 @@ def dna_1hot_efficient(seq: str, seq_len: int = None, n_uniform: bool = False, n
     if n_uniform:
         seq_code = np.zeros((seq_len, 4), dtype="float16")
     else:
-        seq_code = np.zeros((seq_len, 4), dtype="uint8")  # Changed from bool to uint8
+        seq_code = np.zeros((seq_len, 4), dtype="bool")  # Changed from bool to uint8
 
     # Convert sequence to numpy array of bytes
     seq_array = np.frombuffer(seq.encode('ascii'), dtype=np.uint8)

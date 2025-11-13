@@ -378,12 +378,12 @@ class Borzoi(PreTrainedModel):
                     out = self.sigmoid(self.methylation_head(x.float())) # beta values are 0-1
                     out = out.squeeze(1)
                     mask = labels != 0
-                    out = out[mask]
+                    masked_out = out[mask]
                     labels = labels[mask]
                     # loss_fct = SparseMSELoss()
                     loss_fct = nn.MSELoss()
                     if labels is not None:
-                        loss = loss_fct(out, labels)
+                        loss = loss_fct(masked_out, labels)
                     else:
                         loss = None
                     
