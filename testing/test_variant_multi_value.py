@@ -1,5 +1,6 @@
 import torch
 import pandas as pd
+import numpy as np
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import pysam
@@ -59,6 +60,11 @@ with torch.no_grad():
         # Extend lists
         pair_mean_diffs.extend(sum_per_pair.cpu().tolist())
         pair_mean_masked_diffs.extend(sum_per_pair_masked.cpu().tolist())
+
+        if len(pair_mean_diffs) % 4000 == 0:
+            print(f"Processed {len(pair_mean_diffs)} variants.")
+            np.save('means.npy', np.array(pair_mean_diffs))
+            np.save('masked_means.npy', np.array(pair_mean_masked_diffs))
 
 
 ds_csv = variant_ds.data
